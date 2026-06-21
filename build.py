@@ -13,12 +13,16 @@ import os
 import re
 import shutil
 import sys
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from content import PAGES
-from content.site import (BASE_URL, BRAND, BRAND_MARK, NAV, PHONE, PHONE_DISPLAY,
+from content.site import (BASE_URL, BRAND, BRAND_MARK, INDEXNOW_KEY, NAV,
+                          NAVER_VERIFY, PHONE, PHONE_DISPLAY,
                           TELEGRAM_BUILD, TELEGRAM_PARTNER)
+
+SITE = BASE_URL.rstrip("/")
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 MIN_INDEX_CHARS = 2000
@@ -122,7 +126,13 @@ def render_page(page: dict) -> str:
         if noindex
         else '<meta name="robots" content="index,follow">'
     )
-    canonical = BASE_URL.rstrip("/") + "/" + path
+    canonical = SITE + "/" + path
+
+    # 네이버 사이트 소유확인 메타는 메인페이지(루트)에만 출력한다.
+    naver_meta = (
+        f'<meta name="naver-site-verification" content="{NAVER_VERIFY}">\n'
+        if path == "" else ""
+    )
 
     # 히어로가 있는 페이지(메인)는 H1을 히어로 안에서 출력한다.
     if hero:
@@ -143,8 +153,9 @@ def render_page(page: dict) -> str:
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title}</title>
 <meta name="description" content="{desc}">
-{robots}
+{naver_meta}{robots}
 <link rel="canonical" href="{canonical}">
+<link rel="alternate" type="application/rss+xml" title="{BRAND} 매거진" href="{SITE}/rss.xml">
 <meta property="og:type" content="website">
 <meta property="og:title" content="{title}">
 <meta property="og:description" content="{desc}">
@@ -262,9 +273,24 @@ def render_page(page: dict) -> str:
 """
 
 
+def _priority(path: str) -> str:
+    if path == "":
+        return "1.0"
+    if path.endswith("-dong/") or "/station/" in path or "/area/" in path:
+        return "0.8"
+    if path.startswith("magazine/"):
+        return "0.6"
+    return "0.7"
+
+
 def build() -> None:
     report = []
-    sitemap_urls = []
+    sitemap_urls = []   # (loc, priority)
+    rss_items = []      # 매거진 글 (RSS map)
+
+    now = datetime.now(timezone.utc)
+    lastmod = now.strftime("%Y-%m-%d")
+    pubdate = now.strftime("%a, %d %b %Y %H:%M:%S +0000")
 
     for page in PAGES:
         path = page["path"]  # "" 또는 "seoul/eunpyeong-gu/nokbeon-dong/" 형태
@@ -276,13 +302,19 @@ def build() -> None:
 
         chars = text_length(page["body"])
         noindex = page.get("noindex", False) or chars < MIN_INDEX_CHARS
+        loc = SITE + "/" + path
         if not noindex:
-            sitemap_urls.append(BASE_URL.rstrip("/") + "/" + path)
+            sitemap_urls.append((loc, _priority(path)))
+            # 매거진 개별 글은 RSS 항목으로도 노출한다.
+            if path.startswith("magazine/") and path != "magazine/":
+                rss_items.append((page["title"], page["desc"], loc))
         report.append((path or "/", chars, "noindex" if noindex else "index"))
 
-    # sitemap.xml
+    # sitemap.xml (lastmod·priority 포함)
     urls = "\n".join(
-        f"  <url><loc>{u}</loc></url>" for u in sitemap_urls
+        f"  <url><loc>{loc}</loc><lastmod>{lastmod}</lastmod>"
+        f"<changefreq>weekly</changefreq><priority>{pr}</priority></url>"
+        for loc, pr in sitemap_urls
     )
     with open(os.path.join(ROOT, "sitemap.xml"), "w", encoding="utf-8") as f:
         f.write(
@@ -291,12 +323,42 @@ def build() -> None:
             f"{urls}\n</urlset>\n"
         )
 
-    # robots.txt
+    # rss.xml (네이버 서치어드바이저 RSS 제출 + 색인 가속용)
+    items_xml = "\n".join(
+        "  <item>"
+        f"<title>{html.escape(t)}</title>"
+        f"<link>{loc}</link>"
+        f"<guid isPermaLink=\"true\">{loc}</guid>"
+        f"<description>{html.escape(d)}</description>"
+        f"<pubDate>{pubdate}</pubDate>"
+        "</item>"
+        for t, d, loc in rss_items
+    )
+    with open(os.path.join(ROOT, "rss.xml"), "w", encoding="utf-8") as f:
+        f.write(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">\n'
+            "<channel>\n"
+            f"  <title>{html.escape(BRAND)} 매거진</title>\n"
+            f"  <link>{SITE}/magazine/</link>\n"
+            f'  <atom:link href="{SITE}/rss.xml" rel="self" type="application/rss+xml"/>\n'
+            "  <description>은평구 출장마사지·홈타이 방문 관리 매거진</description>\n"
+            "  <language>ko</language>\n"
+            f"  <lastBuildDate>{pubdate}</lastBuildDate>\n"
+            f"{items_xml}\n"
+            "</channel>\n</rss>\n"
+        )
+
+    # robots.txt (sitemap·rss 안내)
     with open(os.path.join(ROOT, "robots.txt"), "w", encoding="utf-8") as f:
         f.write(
             "User-agent: *\nAllow: /\n\n"
-            f"Sitemap: {BASE_URL.rstrip('/')}/sitemap.xml\n"
+            f"Sitemap: {SITE}/sitemap.xml\n"
         )
+
+    # IndexNow 키 파일 — https://<도메인>/<KEY>.txt 에 키 값만 담는다.
+    with open(os.path.join(ROOT, f"{INDEXNOW_KEY}.txt"), "w", encoding="utf-8") as f:
+        f.write(INDEXNOW_KEY)
 
     # .nojekyll (GitHub Pages)
     open(os.path.join(ROOT, ".nojekyll"), "w").close()
@@ -306,7 +368,8 @@ def build() -> None:
     for p, c, r in sorted(report):
         flag = "" if (r == "noindex" or MIN_INDEX_CHARS <= c <= 2500) else "  ⚠"
         print(f"{p.ljust(width)}  {str(c).rjust(5)}  {r}{flag}")
-    print(f"\n{len(report)} pages built, {len(sitemap_urls)} in sitemap.")
+    print(f"\n{len(report)} pages built, {len(sitemap_urls)} in sitemap, "
+          f"{len(rss_items)} in rss.xml, IndexNow key {INDEXNOW_KEY}.txt written.")
 
 
 if __name__ == "__main__":

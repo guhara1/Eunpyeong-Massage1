@@ -1,11 +1,17 @@
 # 사이트 공통 설정
-# 배포 도메인 확정 후 BASE_URL 을 실제 도메인으로 변경하세요.
-BASE_URL = "https://www.barogo-eunpyeong.example.com"
+BASE_URL = "https://eunpyeong-massage1.pages.dev"
 
 BRAND = "바로GO"
 BRAND_MARK = "바"          # 헤더 로고 원형 마크 글자
 PHONE = "0508-202-4719"
 PHONE_DISPLAY = "0508-202-4719"
+
+# 네이버 웹마스터도구 사이트 소유확인 (메인페이지 head에 삽입)
+NAVER_VERIFY = "ed5e7ff9fd6a69de2acacce87397464e1f1c6ec9"
+
+# IndexNow 키 — Bing·Naver·Yandex 즉시 색인 통보용.
+# 빌드 시 루트에 "<KEY>.txt" 키 파일을 생성하며, tools/indexnow.py 가 이 키로 통보한다.
+INDEXNOW_KEY = "0f3a9c1e7b5d42a8e6c0b9d1f4a7e2c5"
 
 # 제작·제휴 문의(텔레그램)
 TELEGRAM_BUILD = "https://t.me/googleseolab"   # 웹사이트 제작문의
